@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>기상 시간 계산기</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen flex items-center justify-center p-4">
+    <div class="bg-white p-8 rounded-xl shadow-lg w-full max-w-md">
+        <h1 class="text-3xl font-bold text-center text-gray-800 mb-6">기상 시간 계산기 ⏰</h1>
+        <form id="calculatorForm" class="space-y-6">
+            <div>
+                <label for="destination" class="block text-sm font-medium text-gray-700">목적지 (올림픽파크포레온에서 출발)</label>
+                <input type="text" id="destination" name="destination" placeholder="예: 서울역, 강남역, 여의도역" class="mt-1 block w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" required>
+            </div>
+            
+            <div>
+                <label for="arrivalTime" class="block text-sm font-medium text-gray-700">도착 시간</label>
+                <input type="time" id="arrivalTime" name="arrivalTime" class="mt-1 block w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" required>
+            </div>
+            
+            <div>
+                <label for="preparationTime" class="block text-sm font-medium text-gray-700">준비 시간 (분)</label>
+                <input type="number" id="preparationTime" name="preparationTime" value="90" class="mt-1 block w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" required>
+            </div>
+            
+            <button type="submit" class="w-full flex justify-center py-3 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition duration-150 ease-in-out">
+                출발 시간 계산하기
+            </button>
+        </form>
+
+        <div id="result" class="mt-8 hidden">
+            <div class="bg-indigo-100 p-6 rounded-xl border border-indigo-200">
+                <h2 class="text-lg font-bold text-indigo-800 mb-2">계산 결과</h2>
+                <p id="resultText" class="text-gray-700 text-base"></p>
+                <p id="errorText" class="text-red-500 text-sm mt-2 hidden"></p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const calculatorForm = document.getElementById('calculatorForm');
+        const resultDiv = document.getElementById('result');
+        const resultText = document.getElementById('resultText');
+        const errorText = document.getElementById('errorText');
+
+        // 공공데이터포털에서 발급받은 API 키를 여기에 입력하세요.
+        // https://www.data.go.kr/tcs/dss/selectApiDataDetailView.do?publicDataPk=15099309
+        const SERVICE_KEY = 'YOUR_SERVICE_KEY';
+
+        // 올림픽파크포레온 아파트의 좌표 (예시)
+        const startX = 127.147775;
+        const startY = 37.521832;
+
+        async function fetchTravelTime(endPoint, startX, startY) {
+            const geocodingUrl = `https://dapi.kakao.com/v2/local/search/address.json?query=${encodeURIComponent(endPoint)}`;
+            const geocodingHeaders = new Headers({
+                'Authorization': 'KakaoAK ' + 'KAKAO_API_KEY' // 카카오 로컬 API 키를 사용하세요.
+            });
+            const geocodingResponse = await fetch(geocodingUrl, { headers: geocodingHeaders });
+            const geocodingData = await geocodingResponse.json();
+
+            if (!geocodingData.documents || geocodingData.documents.length === 0) {
+                throw new Error('목적지의 좌표를 찾을 수 없습니다.');
+            }
+
+            const endX = geocodingData.documents[0].x;
+            const endY = geocodingData.documents[0].y;
+
+            const url = `https://apis.data.go.kr/1613000/ODsayAPI/loadPubtransPath/searchPubtransPath?ServiceKey=${SERVICE_KEY}&SX=${startX}&SY=${startY}&EX=${endX}&EY=${endY}&OPT=1`;
+
+            try {
+                const response = await fetch(url);
+                const data = await response.json();
+
+                if (data.result.status === 200) {
+                    const firstPath = data.result.path[0];
+                    return Math.floor(firstPath.info.totalTime); // 분 단위로 반환
+                } else {
+                    throw new Error(data.result.errorMessage);
+                }
+            } catch (error) {
+                console.error('API 호출 중 오류 발생:', error);
+                throw new Error('이동 경로 정보를 가져오는 데 실패했습니다.');
+            }
+        }
+
+        calculatorForm.addEventListener('submit', async function(e) {
+            e.preventDefault();
+
+            const destination = document.getElementById('destination').value.trim();
+            const arrivalTime = document.getElementById('arrivalTime').value;
+            const preparationTime = parseInt(document.getElementById('preparationTime').value);
+            
+            resultDiv.classList.add('hidden');
+            errorText.classList.add('hidden');
+            resultText.innerHTML = '이동 시간 정보를 가져오는 중...';
+            resultDiv.classList.remove('hidden');
+
+            const [arrivalHour, arrivalMinute] = arrivalTime.split(':').map(Number);
+            const arrivalDate = new Date();
+            arrivalDate.setHours(arrivalHour, arrivalMinute, 0, 0);
+
+            try {
+                const travelTimeMinutes = await fetchTravelTime(destination, startX, startY);
+
+                // 총 소요 시간 (이동 시간 + 준비 시간) 계산
+                const totalDurationMinutes = travelTimeMinutes + preparationTime;
+                
+                // 도착 시간에서 총 소요 시간을 뺀 출발 시간 계산
+                const departureTime = new Date(arrivalDate.getTime() - totalDurationMinutes * 60000);
+                
+                const departureHour = String(departureTime.getHours()).padStart(2, '0');
+                const departureMinute = String(departureTime.getMinutes()).padStart(2, '0');
+
+                // 결과 출력
+                resultText.innerHTML = `
+                    <p><strong>목적지:</strong> ${destination}</p>
+                    <p><strong>도착 시간:</strong> ${arrivalTime}</p>
+                    <p><strong>예상 이동 시간:</strong> ${travelTimeMinutes}분</p>
+                    <p><strong>준비 시간:</strong> ${preparationTime}분</p>
+                    <hr class="my-4 border-indigo-200">
+                    <p class="text-xl font-bold text-indigo-800">
+                        출발 시간: ${departureHour}:${departureMinute}
+                    </p>
+                `;
+            } catch (error) {
+                errorText.textContent = `오류: ${error.message}`;
+                errorText.classList.remove('hidden');
+                resultText.innerHTML = '';
+            }
+        });
+    </script>
+</body>
+</html>
